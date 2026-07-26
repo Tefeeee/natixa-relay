@@ -128,9 +128,17 @@ async def _handle_join(ws: WebSocketServerProtocol, code: str):
     room = _rooms.get(code)
     if room is None or not room.get("known"):
         await _send_json(ws, {"action": "error", "message": "Kod bulunamadi. Kodu kontrol et."})
+        # Bu kod hicbir zaman gecerli olmayacak (ya hic olusturulmadi ya da
+        # sunucu yeniden baslayip hafizadaki odalari kaybetti - ornegin
+        # Render'in ucretsiz katmaninda bir yeniden dagitim/restart sonrasi).
+        # Soketi acik birakirsak istemci "bagli ama ise yaramaz" halde
+        # sonsuza kadar bekler ve tekrar denemez. Kapatarak istemcinin
+        # normal yeniden-baglanma mantigini tetikliyoruz.
+        await ws.close()
         return
     if len(room["members"]) >= 2 and ws not in room["members"]:
         await _send_json(ws, {"action": "error", "message": "Bu odada zaten 2 kisi bagli."})
+        await ws.close()
         return
 
     room["members"].add(ws)
@@ -230,7 +238,14 @@ async def main():
     async with websockets.serve(
         handler, "0.0.0.0", port,
         process_request=health_check,
-        max_size=2 * 1024 * 1024,  # 2MB - fotograf/dosya parcalari icin yeterli
+        # NOT: Istemci artik foto/video'yu kucuk parcalara bolup gonderiyor
+        # (bkz. chat_window.py: CHAT_MEDIA_CHUNK_CHARS), o yuzden buraya
+        # normal kullanimda hic yaklasilmiyor; fazladan pay icin buyutuldu.
+        # (Bu degisikligin etkili olmasi icin relay sunucusunu yeniden
+        # deploy etmen gerekir - istemci tarafi zaten eski 2MB sinirinin
+        # rahat altinda kalacak sekilde parcaliyor, o yuzden deploy
+        # etmesen de mevcut sunucuyla calisir.)
+        max_size=8 * 1024 * 1024,  # 8MB
         ping_interval=20,
         ping_timeout=20,
     ):
