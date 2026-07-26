@@ -175,6 +175,7 @@ async def handler(ws: WebSocketServerProtocol):
     try:
         async for message in ws:
             if isinstance(message, (bytes, bytearray)):
+                log.info("Binary mesaj alindi (%s): %d bayt", peer_info, len(message))
                 # Eslesme tamamlanmis binary veri - korlemesine karsi tarafa ilet.
                 target = await _relay_target(ws)
                 if target is not None:
@@ -184,10 +185,16 @@ async def handler(ws: WebSocketServerProtocol):
                         pass
                 continue
 
+            # TANI AMACLI: gelen ham metni oldugu gibi logla - "create"
+            # gonderilip gonderilmedigini, yoksa hic mesaj gelip gelmedigini
+            # buradan gorecegiz.
+            log.info("Metin mesaji alindi (%s): %r", peer_info, message[:500])
+
             # Kontrol mesaji (JSON metin)
             try:
                 data = json.loads(message)
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, TypeError) as exc:
+                log.warning("JSON parse edilemedi (%s): %r - hata: %s", peer_info, message[:200], exc)
                 continue
 
             action = data.get("action")
@@ -195,8 +202,12 @@ async def handler(ws: WebSocketServerProtocol):
                 await _handle_create(ws)
             elif action == "join":
                 await _handle_join(ws, data.get("code", ""))
+            else:
+                log.warning("Bilinmeyen action (%s): %r", peer_info, data)
     except websockets.exceptions.ConnectionClosed:
         pass
+    except Exception:
+        log.exception("handler icinde beklenmeyen hata (%s)", peer_info)
     finally:
         await _handle_disconnect(ws)
         log.info("Baglanti kapandi: %s", peer_info)
